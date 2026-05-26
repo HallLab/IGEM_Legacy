@@ -136,3 +136,14 @@ backup
 results
 *.csv
 test_data_files
+
+db.sqlite3.zip
+
+# Local datasets / scratch
+echo/
+
+# Large binary assets and test fixtures (kept out of git)
+igem/load/test/data_files/
+docs/UserGuider/IGEM Tutorial.pptx
+docs/UserGuider/IGEM Tutorial.pptx.zip
+dist/

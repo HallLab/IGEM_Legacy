@@ -245,7 +245,7 @@ def word_to_term(path=None):
             WordTerm.objects.values(
                 "word", "term_id", "term_id__term", "term_id__description"
             )
-            .filter(status=True)
+            # .filter(status=True)
             .order_by("word")
         )
     )
