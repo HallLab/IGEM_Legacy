@@ -12,8 +12,11 @@ through the command line. Example:
     $ python manage.py filter --term_map 'term=["gene:246126"], path_out="result.csv"' # noqa E051
 """
 
+import os
+import re
 import sys
 
+import pandas as pd
 from django.conf import settings
 from django.core.management.base import BaseCommand
 
@@ -25,6 +28,46 @@ except:  # noqa E722
     raise
 
 from ge.filter import positions_to_term
+
+
+def _extract_path_in(parameters: str) -> str:
+    m = re.search(r"path_in\s*=\s*['\"]([^'\"]+)['\"]", parameters)
+    if not m:
+        raise ValueError("Missing required parameter: path_in='...'")
+    return m.group(1)
+
+def _read_parameters_file(path_in: str) -> pd.DataFrame:
+    dfp = pd.read_csv(path_in)
+    dfp.columns = [c.strip().lower() for c in dfp.columns]
+    required = {"index", "parameter", "value"}
+    if not required.issubset(set(dfp.columns)):
+        raise ValueError(f"Parameters file must have columns: {sorted(required)}")
+    return dfp
+
+def _get_input_terms(dfp: pd.DataFrame) -> set[str]:
+    terms = dfp[
+        (dfp["index"].astype(str).str.lower() == "filter") &
+        (dfp["parameter"].astype(str).str.lower() == "term")
+    ]["value"].astype(str).str.strip().tolist()
+    return set(t for t in terms if t)
+
+def _get_path_out(dfp: pd.DataFrame) -> str:
+    # Expect: index=path, parameter=path, value=/.../out.csv
+    rows = dfp[
+        (dfp["index"].astype(str).str.lower() == "path") &
+        (dfp["parameter"].astype(str).str.lower() == "path")
+    ]["value"].astype(str).str.strip().tolist()
+    if not rows:
+        raise ValueError("Could not find path_out in parameters file (row: index=path, parameter=path)")
+    return rows[0]
+
+def _pick_col(df: pd.DataFrame, candidates: list[str]) -> str:
+    for c in candidates:
+        if c in df.columns:
+            return c
+    raise ValueError(f"Could not find any candidate columns: {candidates}. Available: {list(df.columns)}")
+
+
 
 
 class Command(BaseCommand):
@@ -102,6 +145,15 @@ class Command(BaseCommand):
         parser.add_argument('--boundaries', type=int, default=10000)
         parser.add_argument('--delimiter', default=None)
         parser.add_argument('--has_header', default=True)
+
+        parser.add_argument(
+            "--term_map_internal",
+            type=str,
+            metavar="parameters",
+            action="store",
+            default=None,
+            help="returns only relationships where BOTH terms are in the input term list (induced subgraph)",
+        )
 
     def handle(self, *args, **options):
         # POSITION TO TERMS MAP
@@ -274,6 +326,48 @@ class Command(BaseCommand):
                 )  # noqa E501
                 if (df["df"].__class__.__name__) == "DataFrame":
                     print(df["df"])
+
+            except Exception as e:
+                self.stdout.write(self.style.ERROR_OUTPUT(f"  {e}"))
+
+        if options["term_map_internal"]:
+            parameters = str(options["term_map_internal"])  # DO NOT .lower() (paths!)
+            self.stdout.write(self.style.SUCCESS("Run term_map_internal (induced subgraph)"))
+            self.stdout.write(self.style.HTTP_REDIRECT(f"  Informed parameters: {parameters}"))
+            print()
+
+            try:
+                path_in = _extract_path_in(parameters)
+                dfp = _read_parameters_file(path_in)
+
+                input_terms = _get_input_terms(dfp)
+                path_out = _get_path_out(dfp)
+
+                # 1) Run the normal term_map (it writes to path_out)
+                ctx = {}
+                exec("df = filter.term_map(" + parameters + ")", globals(), ctx)
+
+                # 2) Load the produced CSV and filter it
+                if not os.path.isfile(path_out):
+                    raise FileNotFoundError(f"term_map output file not found: {path_out}")
+
+                df_full = pd.read_csv(path_out)
+
+                col_t1 = _pick_col(df_full, ["term_1", "term_1_id", "term1", "term1_id"])
+                col_t2 = _pick_col(df_full, ["term_2", "term_2_id", "term2", "term2_id"])
+
+                s1 = df_full[col_t1].astype(str).str.strip()
+                s2 = df_full[col_t2].astype(str).str.strip()
+
+                df_internal = df_full[s1.isin(input_terms) & s2.isin(input_terms)].copy()
+
+                # 3) Save internal output next to path_out
+                base, ext = os.path.splitext(path_out)
+                out_internal = f"{base}_internal{ext or '.csv'}"
+                df_internal.to_csv(out_internal, index=False)
+
+                self.stdout.write(self.style.SUCCESS(f"✅ Internal term_map saved to: {out_internal}"))
+                self.stdout.write(self.style.SUCCESS(f"   Rows full: {len(df_full):,} | internal: {len(df_internal):,}"))
 
             except Exception as e:
                 self.stdout.write(self.style.ERROR_OUTPUT(f"  {e}"))

@@ -17,12 +17,12 @@ class GeFilterTest(GeTestBase):
     def test_ge_filter_terms_map_byfile(self):
         y, tag = filter.term_map(
             path_in=(self.path + "/parameters_test.csv"),
-            path_out=(self.path + "/results/terms_map_byfile.csv"),
+            path_out=(self.path + "/results/terms_map_byfile_new.csv"),
         )
         assert y is True
 
     def test_ge_filter_terms_map_byargs(self):
-        y = filter.term_map(term=["gene:1"])
+        y = filter.term_map(term=["meta:hmdb0032133"])
         assert not y.empty
 
     # Tests filters on gene exposome layout

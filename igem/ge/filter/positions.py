@@ -456,7 +456,7 @@ def positions_to_term(
 
     # create the model
     # chrom:position x Word
-    result_df['chromosome:position'] = result_df['chromosome'] + ':' + result_df['position'].astype(str)  # noqa E501
+    result_df['chromosome:position'] = result_df['chromosome'].astype(str) + ':' + result_df['position'].astype(str)  # noqa E501
     result_df = result_df[[
         'chromosome:position',
         'string',

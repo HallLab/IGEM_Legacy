@@ -1,10 +1,26 @@
 import os
-from queue import Empty
 import sys
+from queue import Empty
+
 import pandas as pd
-from django.core.management.base import BaseCommand
 from django.core.exceptions import ObjectDoesNotExist
-from ge.models import Category, DSTColumn, Group, KeyHierarchy, KeyLink, Keyge, Dataset, KeyWord, Database, LogsCollector, PrefixOpc, WFControl, WordMap
+from django.core.management.base import BaseCommand
+from ge.models import (
+    Category,
+    Database,
+    Dataset,
+    DSTColumn,
+    Group,
+    Keyge,
+    KeyHierarchy,
+    KeyLink,
+    KeyWord,
+    LogsCollector,
+    PrefixOpc,
+    WFControl,
+    WordMap,
+    WordTerm,
+)
 
 # Uptades aren't works:
 # from django_bulk_update import bulk_update   https://pypi.org/project/django-bulk-update/
@@ -891,9 +907,77 @@ class Command(BaseCommand):
                 KeyWord.objects.bulk_create(model_instances, ignore_conflicts=True) 
                 self.stdout.write(self.style.SUCCESS('  Load with success to KeyWords'))
 
+            elif v_table == 'wordterm':
+                # python manage.py db --load wordterm --path /path/seu_export.csv
+
+                try:
+                    DFR = pd.read_csv(v_path)
+
+                    # Normalize column names
+                    DFR.columns = [c.lower() for c in DFR.columns]
+
+                    # Expected columns: word, status, commute, term_id
+                    required_cols = {"word", "status", "commute", "term_id"}
+                    missing = required_cols - set(DFR.columns)
+                    if missing:
+                        self.stdout.write(self.style.ERROR(f"  Missing columns: {sorted(list(missing))}"))
+                        self.stdout.write(self.style.ERROR("  Expected: word,status,commute,term_id"))
+                        sys.exit(2)
+
+                    # Normalize word (string)
+                    DFR["word"] = DFR["word"].astype(str).str.strip().str.lower()
+
+                    # Normalize booleans (support 0/1, true/false, True/False)
+                    def norm_bool_series(s):
+                        s = s.astype(str).str.strip().str.lower()
+                        return s.replace({
+                            "true": "True",
+                            "false": "False",
+                            "1": "True",
+                            "0": "False",
+                        })
+
+                    DFR["status"] = norm_bool_series(DFR["status"])
+                    DFR["commute"] = norm_bool_series(DFR["commute"])
+
+                    # term_id as int
+                    DFR["term_id"] = DFR["term_id"].astype(int)
+
+                except IOError as e:
+                    self.stdout.write(self.style.ERROR("ERRO:"))
+                    print(e)
+                    sys.exit(2)
+                except Exception as e:
+                    self.stdout.write(self.style.ERROR("ERRO parsing CSV:"))
+                    print(e)
+                    sys.exit(2)
+
+                # Validate: no nulls
+                if DFR.isnull().values.any():
+                    self.stdout.write(self.style.ERROR("  Null values detected. Check log file"))
+                    DFR.to_csv(str(v_path + ".log"), index=False)
+                    sys.exit(2)
+
+                model_instances = [
+                    WordTerm(
+                        word=record.word,
+                        term_id=record.term_id,
+                        status=record.status,
+                        commute=record.commute,
+                    )
+                    for record in DFR.itertuples(index=False)
+                ]
+
+                WordTerm.objects.bulk_create(model_instances, ignore_conflicts=True)
+                self.stdout.write(self.style.SUCCESS("  Load with success to WordTerm"))
+
+
             else:
                 self.stdout.write(self.style.HTTP_NOT_FOUND('Table not recognized in the system. Choose one of the options: '))
                 self.stdout.write(self.style.HTTP_NOT_FOUND('   database | dataset | ds_column | keyge | category | group | prefix | keywords'))
+
+
+
 
 
         # TRUNCATE BLOCK

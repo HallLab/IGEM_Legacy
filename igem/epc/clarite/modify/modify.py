@@ -209,7 +209,7 @@ def colfilter_min_n(
 
 def colfilter_percent_zero(
     data,
-    filter_percent: int = 200,
+    filter_percent: int = 90,
     skip: Optional[Union[str, List[str]]] = None,
     only: Optional[Union[str, List[str]]] = None,
 ):
